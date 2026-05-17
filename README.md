@@ -39,6 +39,9 @@ python -u generate_caption.py \
     --max_workers 16 \
     --max_tokens 8192
 ```
+Currently, only OpenAI style api is supported. If you want to test local models, please use `vLLM` or `SGLang` to serve the model.
+
+TODO: support local inference with `vLLM` and `transformers` backend.
 
 ---
 

@@ -39,7 +39,6 @@ def encode_image(image):
 
 def get_single_data_results(payload, client):
     response = client.chat.completions.create(**payload)
-    # TODO: consider choices is empty? error: IndexError: list index out of range
     choices = response.choices
     if choices:
         output = response.choices[0].message.content
@@ -47,32 +46,11 @@ def get_single_data_results(payload, client):
         output = "EMPTY"
     model = response.model
     usage = response.usage
-    # if want to save all information, use  response.to_dict()
-    if "gemini" in model:
-        token_stats = {
-            "completion_tokens": usage.completion_tokens,
-            "prompt_tokens": usage.prompt_tokens,
-            "total_tokens": usage.total_tokens,
-            "reasoning_tokens": usage.completion_tokens_details.reasoning_tokens,
-            "text_tokens": usage.prompt_tokens_details.text_tokens,
-        }
-    else:
-        # for GPT
-        token_stats = {
-            "completion_tokens": usage.completion_tokens,
-            "prompt_tokens": usage.prompt_tokens,
-            "total_tokens": usage.total_tokens,
-            "reasoning_tokens": usage.completion_tokens_details.reasoning_tokens,
-        }
-    return {
-        "output": output,
-        "model": model,
-        "usage": token_stats,
-    }
+    raw_response = response.to_dict()
+    return {"output":output,"raw_response":raw_response}
 
 
 def process_single_data(client, args, data):
-    # build payload
     prompt = CAPTION_PROMPTS[args.caption_prompt]
     image_paths = data["image_paths"]
     domain = data["domain"]
@@ -99,9 +77,27 @@ def process_single_data(client, args, data):
     payload["model"] = args.model
     payload["messages"] = messages
     payload["temperature"] = args.temperature
+    payload["top_p"] = args.top_p
     payload["max_tokens"] = args.max_tokens
     payload["n"] = args.n
+    # most models use thinking as default, so use --disable_thinking
+    # if you do not set --reasoning-parser in vllm,output will include ...</think>
+    # set --reasoning-parser,get reasoning content and tokens, but for caption, it is ok for all.
+    
+    extra_args = {}
+    extra_args["top_k"] = args.top_k
+    if args.disable_thinking:
+        extra_args.update({"chat_template_kwargs": {"enable_thinking": False}})
+        # payload["extra_body"] = {"chat_template_kwargs": {"enable_thinking": False}}
+    ################
+    # TODO, extra ?
+    if args.presence_penalty != 1.0:
+        payload["presence_penalty"] = args.presence_penalty
+    if args.repetition_penalty != 1.0:
+        payload["repetition_penalty"] = args.repetition_penalty
+    ############
 
+    payload["extra_body"] = extra_args
     result = copy.deepcopy(data)
     response = get_single_data_results(payload, client)
     result["results"] = response
@@ -172,6 +168,14 @@ def get_args():
     parser.add_argument("--top_p", type=float, default=1.0)
     parser.add_argument("--max_samples", type=int, default=-1)
     parser.add_argument("--max_tokens", type=int, default=1024)
+    parser.add_argument("--top_k", type=int, default=-1)
+    parser.add_argument("--presence_penalty",default=1.0)
+    parser.add_argument("--repetition_penalty",default=1.0)
+    parser.add_argument(
+    "--disable_thinking",
+    action="store_true",
+    help="Disable thinking mode"
+)
     args = parser.parse_args()
 
     # Validate output path
@@ -202,6 +206,10 @@ def main():
         text_data = res
 
     client = OpenAI()
+    # model_name = client.models.list().data[0].id  # check model list
+    # print(model_name)
+    # assert 0
+    
     if args.max_samples > 0:
         text_data = text_data[: args.max_samples]
         print(f"Only run {args.max_samples} samples")
